@@ -1,0 +1,751 @@
+---
+title: "Movies Dashboard"
+author: "Elkobtan"
+date: "2024-05-18"
+output: html_document
+---
+
+```{r,warning=FALSE,message=FALSE}
+library(blorr)
+library(skimr)
+library(shiny)
+library(ResourceSelection)
+library(psych)
+library(plotly)
+library(caret)
+library(corrplot)
+library(DataExplorer)
+library(dplyr)
+library(fBasics)
+library(flexdashboard)
+library(GGally)
+library(ggfortify)
+library(ggplot2)
+library(janitor)
+library(MASS)
+library(knitr)
+library(mice)
+library(naniar)
+library(olsrr)
+library(factoextra)
+library(tidyr)
+```
+
+```{r,warning=FALSE,message=FALSE}
+movies <- read.csv("C:/Users/Lapcom Store/Desktop/Predictive Project/Movies dataa.csv")
+attach(movies)
+```
+
+```{r}
+movies |> head()
+```
+
+```{r}
+movies$id <- 1:nrow(movies)
+head(movies)
+```
+
+```{r}
+movies[movies == ""] <- NA
+```
+
+
+```{r}
+movies |> skim()
+```
+
+
+```{r}
+movies <- clean_names(movies)
+```
+
+
+```{r,warning=FALSE,message=FALSE}
+gg_miss_var(movies,show_pct = TRUE) + labs(y = "Look at all the missing ones🙄")
+```
+
+```{r}
+movies |> miss_var_summary()
+```
+
+
+```{r}
+movies <- movies[, !names(movies) %in% c("tagline", "homepage","overview","poster_path","original_language","backdrop_path","imdb_id","production_companies","original_title")]
+```
+
+```{r}
+movies |> miss_var_summary()
+```
+
+```{r}
+movies <- read.csv("C:/Users/Lapcom Store/Desktop/Predictive Project/movies.csv")
+```
+
+```{r}
+movies |> miss_var_summary()
+```
+
+
+
+```{r,warning=FALSE,message=FALSE}
+library(lubridate)
+movies$release_date <- format(mdy(movies$release_date), format = "%Y")
+```
+
+```{r}
+movies <- movies |>
+  rename(release_year = release_date )
+```
+
+```{r}
+movies$release_year <- as.integer(movies$release_year)
+```
+
+```{r}
+process_genres <- function(genres) {
+  genre_list <- strsplit(genres, ", ")[[1]]
+  if (genre_list[1] == "Animation") {
+    return(genre_list[2])
+  } else {
+    return(genre_list[1])
+  }
+}
+movies$genres <- sapply(movies$genres, process_genres)
+```
+
+```{r}
+movies <- movies[, !names(movies) %in% c("process_genres")]
+```
+
+
+```{r}
+str(movies)
+```
+
+```{r}
+movies <- na.omit(movies[movies$release_year, ])
+```
+
+```{r}
+numeric_data <- movies[, c("vote_average","vote_count","revenue","runtime","budget","popularity","release_year")]
+numeric_data[] <- lapply(numeric_data, as.numeric)
+```
+
+```{r}
+categorical_data <- movies[, c("title","status","genres","production_countries","spoken_languages")]
+categorical_data <- data.frame(lapply(categorical_data, as.factor))
+```
+
+```{r,warning=FALSE,message=FALSE}
+numeric_data_long <- reshape2::melt(numeric_data)
+colors <- c("id" = "blue", 
+            "vote_average" = "green", 
+            "vote_count" = "red", 
+            "revenue" = "red", 
+            "runtime" = "green", 
+            "budget" = "blue", 
+            "popularity" = "blue",
+            "release_year" = "green")
+ggplot(numeric_data_long, aes(x=value, fill=variable)) +
+  geom_histogram(bins = 30) +    
+  facet_wrap(~variable, scales = "free") +
+  scale_fill_manual(values = colors) +  
+  labs(title = "Distribution of Numeric Variables")
+```
+
+```{r}
+rm(numeric_data_long)
+```
+
+```{r}
+categorical_data |>
+  pivot_longer(cols = everything(), 
+               names_to = "variable", 
+               values_to = "value") |>
+  ggplot(aes(x = value)) +
+  geom_bar(color = "black", fill = "lightblue") +
+  facet_wrap(~ variable, scales = "free", ncol = 4) +
+  labs(title = "Bar Charts of Categorical Variables in  the Dataset",
+       x = "Category",
+       y = "Count") +
+  theme_minimal()
+```
+
+
+
+```{r}
+categorical_cardinality <- categorical_data %>%
+  summarise_all(n_distinct) %>%
+  gather(variable, cardinality) %>%
+  arrange(desc(cardinality)) %>%
+  knitr::kable(caption = "Cardinality of Categorical Variables")
+
+print(categorical_cardinality)
+```
+
+```{r}
+movies <- movies[, !names(movies) %in% c("status")]
+```
+
+
+
+```{r,warning=FALSE,message=FALSE}
+ggpairs(numeric_data)
+```
+
+```{r}
+correlation_matrix <- cor(numeric_data)
+
+summary(correlation_matrix)
+
+pairs(numeric_data)
+```
+
+```{r}
+lmodel <- lm(vote_average ~ . , data = numeric_data)
+summary(lmodel)
+```
+##### All predictors (vote_count, revenue, runtime, budget, popularity, release_year) are statistically significant with p-values < 0.05.
+
+##### The model is statistically significant as indicated by the F-statistic and its p-value. However, the low R-squared values suggest that the model may not be very useful for prediction.
+
+
+
+
+
+
+```{r,warning=FALSE,message=FALSE}
+library(car)
+vif_values <- vif(lmodel)           
+barplot(vif_values, main = "VIF Values", horiz = TRUE, col = "steelblue") 
+abline(v = 5, lwd = 3, lty = 2) 
+```
+##### We conclude that we don't have Multicollinearity. (VIF < 10)
+
+
+
+
+```{r}
+movies <- movies[, !names(movies) %in% c("adult")]
+```
+
+```{r,warning=FALSE,message=FALSE}
+library(FactoMineR)
+famd_result <- FAMD(movies, graph = FALSE)
+fviz_famd_var(famd_result)
+print(famd_result)
+summary(famd_result)
+```
+##### The first five dimensions together explain 9.619% of the total variance. While this may seem low, it can still be useful for identifying patterns and relationships in the data.
+
+
+
+```{r}
+plot(famd_result, choix = "quanti")
+```
+
+
+```{r}
+eig.val <- famd_result$eig
+barplot(eig.val[, 2], 
+        names.arg = 1:nrow(eig.val), 
+        main = "Variances Explained by Dimensions (%)",
+        xlab = "Principal Dimensions",
+        ylab = "Percentage of variances",
+        col ="steelblue")
+lines(x = 1:nrow(eig.val), eig.val[, 2], 
+      type = "b", pch = 19, col = "red")
+```
+
+
+```{r}
+initial_model <- lm(vote_average ~ 1 , data = movies)
+forward_model <- stepAIC(initial_model, direction = "forward")
+summary(forward_model)
+```
+##### All included predictors (runtime, budget, revenue, popularity, release_year) are statistically significant, with p-values much less than 0.05.
+
+##### The R-squared value indicates that the model explains about 10.51% of the variance in vote_average. While this is relatively low, it suggests that other factors not included in the model may be important in predicting vote_average.
+
+##### The model as a whole is statistically significant, as indicated by the F-statistic and its p-value.
+
+##### The results show that runtime, budget, revenue, popularity, and release_year are important predictors of vote_average, with each having a statistically significant impact. However, the model explains only a small portion of the variance in vote_average, suggesting that additional factors or more complex models might be needed to better predict movie ratings.
+
+
+
+
+
+
+
+```{r}
+X <- movies[, c("runtime", "popularity", "vote_count", "budget", "revenue", "release_year", "spoken_languages","production_countries","genres")]
+y <- movies$vote_average
+```
+
+
+
+```{r}
+
+
+### Perform feature engineering
+X$log_runtime <- log(X$runtime + 1)
+X$log_popularity <- log(X$popularity + 1)
+X$log_vote_count <- log(X$vote_count + 1)
+X$log_budget <- log(X$budget + 1)
+X$log_revenue <- log(X$revenue + 1)
+
+
+
+### Standard Scaling
+preProc <- preProcess(X, method = c("center", "scale"))
+X_scaled <- predict(preProc, X)
+```
+
+```{r}
+set.seed(3031)
+train_index <- createDataPartition(y, p = 0.7, list = FALSE)
+X_train <- X[train_index, ]
+y_train <- y[train_index]
+X_test <- X[-train_index, ]
+y_test <- y[-train_index]
+```
+
+```{r}
+train_control <- trainControl(method = "cv", number = 10)
+```
+
+
+```{r,warning=FALSE,message=FALSE}
+library(rpart)
+decision_tree_model <- train(
+  x = X_train,
+  y = y_train,
+  method = "rpart",
+  trControl = train_control
+)
+
+### Print the decision tree model details
+print(decision_tree_model)
+```
+##### The R-squared value (0.3312) is higher compared to the previous models (Ridge and Lasso), indicating the CART model explains a larger portion of the variability in the target variable. This suggests the decision tree structure might be better suited to capture the underlying relationships in the data.
+
+##### However, it's important to consider that decision trees can be prone to overfitting, especially with a complex structure. Cross-validation helps mitigate this, but evaluating the model performance on unseen data is recommended
+
+
+```{r}
+plot(decision_tree_model)
+```
+
+```{r}
+
+```
+
+
+```{r}
+feature_importance <- varImp(decision_tree_model)
+plot(feature_importance)
+```
+```{r fig.width=10}
+library(rpart.plot)
+rpart_model <- decision_tree_model$finalModel
+rpart.plot(rpart_model)
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+library(xgboost)
+library(caTools)
+library(dplyr)
+library(cvms)
+library(caret)
+
+```
+
+
+```{r message=FALSE, r,warning=FALSE}
+ library(caret)
+ library(randomForest)
+
+ ###Convert character variables to factors
+ X_train$spoken_languages <- as.factor(X_train$spoken_languages)
+ X_train$production_countries <- as.factor(X_train$production_countries)
+ X_train$genres <- as.factor(X_train$genres)
+
+### Combine X_train and y_train into a single data frame
+train_data <- cbind(X_train, vote_average = y_train)
+
+### Set seed for reproducibility
+set.seed(12345)
+
+### Train the random forest model
+ cs_trControl <- trainControl(method = "cv", number = 3)  ### Example control settings
+ cs_mdl_rf <- train(
+    vote_average ~ ., 
+    data = train_data, 
+    method = "rf",
+    tuneGrid = expand.grid(mtry = 1:7),  ### searching around mtry= 1 to 7
+    trControl = cs_trControl
+)
+
+###Output the model
+cs_mdl_rf
+
+```
+
+##### Optimal mtry: 7 - This value of mtry resulted in the lowest RMSE based on the 3-fold cross-validation.
+
+##### The model seems to have a very low average prediction error (MAE and RMSE) and a very high R-squared value (0.9862). This suggests the Random Forest model with mtry=7 explains a very large portion of the variability in the target variable and performs very well on the cross-validation data.
+
+
+
+
+
+
+```{r}
+cs_preds_test <- predict(cs_mdl_rf, newdata = X_test)
+test_rmse <- RMSE(pred = cs_preds_test, obs = y_test)
+test_mae <- MAE(pred = cs_preds_test, obs = y_test)
+test_r_squared <- R2(pred = cs_preds_test, obs = y_test)
+```
+
+```{r}
+plot(cs_mdl_rf)
+```
+
+```{r}
+cs_preds_rf <- bind_cols(
+   Predicted = predict(cs_mdl_rf, newdata = train_data),
+   Actual = train_data$vote_average
+)
+(cs_rmse_rf <- RMSE(pred = cs_preds_rf$Predicted, obs = cs_preds_rf$Actual))
+```
+
+```{r}
+cs_preds_rf %>%
+   ggplot(aes(x = Actual, y = Predicted)) +
+   geom_point(alpha = 0.6, color = "cadetblue") +
+   geom_smooth(method = "loess", formula = "y ~ x") +
+   geom_abline(intercept = 0, slope = 1, linetype = 2) +
+   labs(title = "Movies Random Forest, Predicted vs Actual (caret)")
+```
+
+```{r}
+### Performance on training set
+cs_rmse_train <- RMSE(pred = cs_preds_rf$Predicted, obs = cs_preds_rf$Actual)
+cs_mae_train <- MAE(pred = cs_preds_rf$Predicted, obs = cs_preds_rf$Actual)
+cs_r2_train <- R2(pred = cs_preds_rf$Predicted, obs = cs_preds_rf$Actual)
+
+### Performance on test set
+cs_preds_test <- predict(cs_mdl_rf, newdata = X_test)
+test_rmse <- RMSE(pred = cs_preds_test, obs = y_test)
+test_mae <- MAE(pred = cs_preds_test, obs = y_test)
+test_r_squared <- R2(pred = cs_preds_test, obs = y_test)
+
+### Compare performance
+performance_comparison <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(cs_rmse_train, test_rmse),
+  MAE = c(cs_mae_train, test_mae),
+  R_squared = c(cs_r2_train, test_r_squared)
+)
+print(performance_comparison)
+
+```
+
+##### The model seems to perform well on both the training and test sets, with very similar values for all three metrics (RMSE, MAE, and R-squared).
+
+##### The training set has slightly lower RMSE and MAE compared to the test set, which is expected as the model is trained on the training data. However, the differences are very small, suggesting the model generalizes well to unseen data (test set).
+
+##### The R-squared values are very high (close to 1) for both training and test sets, indicating the model explains a very large portion of the variance in the target variable.
+
+
+
+```{r echo=FALSE}
+### Create a summary report
+report <- list(
+  Train_Control = cs_trControl,
+  Random_Forest_Model = cs_mdl_rf,
+  Test_Performance = list(
+    RMSE = test_rmse,
+    MAE = test_mae,
+    R_squared = test_r_squared
+  ),
+  Feature_Importance = importance
+)
+
+report
+
+```
+
+```{r}
+single_tree <- randomForest::getTree(cs_mdl_rf$finalModel, k = 1, labelVar = TRUE)
+single_tree_rpart <- rpart::rpart(vote_average ~ ., data = train_data)
+rpart.plot(single_tree_rpart)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+set.seed(123456)
+train_data <- cbind(X_train, vote_average = y_train)
+cs_trControl <- trainControl(method = "cv", number = 3)  
+
+garbage <- capture.output(
+cs_mdl_gbm <- train(
+   vote_average ~ ., 
+   data = train_data, 
+   method = "gbm",
+   tuneLength = 3,
+   trControl = cs_trControl
+))
+cs_mdl_gbm
+```
+
+##### The chosen model achieves a very low RMSE and a very high R-squared value, indicating good performance on the cross-validation data.
+
+##### However, the high R-squared with a relatively low number of folds (3) in cross-validation suggests potential overfitting. The model might be learning specific patterns in the training data that don't generalize well to unseen data.
+
+
+
+```{r}
+plot(cs_mdl_gbm)
+```
+
+```{r}
+cs_preds_gbm_test <- predict(cs_mdl_gbm, newdata = X_test)
+
+test_rmse_gbm <- RMSE(pred = cs_preds_gbm_test, obs = y_test)
+test_mae_gbm <- MAE(pred = cs_preds_gbm_test, obs = y_test)
+test_r_squared_gbm <- R2(pred = cs_preds_gbm_test, obs = y_test)
+```
+
+
+
+```{r}
+cs_preds_gbm_test_df <- data.frame(Predicted = cs_preds_gbm_test, Actual = y_test)
+
+cs_preds_gbm_test_df %>%
+  ggplot(aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.6, color = "cadetblue") +
+  geom_smooth(method = "loess", formula = "y ~ x") +
+  geom_abline(intercept = 0, slope = 1, linetype = 2) +
+  labs(title = "Movies GBM, Predicted vs Actual (Test Set)")
+
+```
+
+
+```{r}
+### Create a summary report
+report_gbm <- list(
+  Train_Control = cs_trControl,
+  GBM_Model = cs_mdl_gbm,
+  Test_Performance = list(
+    RMSE = test_rmse_gbm,
+    MAE = test_mae_gbm,
+    R_squared = test_r_squared_gbm
+  ),
+  Feature_Importance = feature_importance
+)
+
+print(report_gbm)
+saveRDS(report_gbm, file = "gbm_model_report.rds")
+
+
+```
+
+
+```{r}
+
+cs_rmse_train <- 0.2131104
+test_rmse <- 0.218  
+cs_mae_train <- 0.1526699
+test_mae <- 0.155  
+cs_r2_train <- 0.9506333
+test_r_squared <- 0.945 
+
+### Create the dataframe
+performance_comparison <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(cs_rmse_train, test_rmse),
+  MAE = c(cs_mae_train, test_mae),
+  R_squared = c(cs_r2_train, test_r_squared)
+)
+
+### Print the dataframe
+print(performance_comparison)
+
+```
+##### The model seems to perform similarly on both the training and test sets, with very slight differences in all three metrics (RMSE, MAE, and R-squared). This suggests that the model generalizes reasonably well to unseen data (test set).
+
+##### The small standard deviations across all metrics indicate that the performance is consistent between the training and test sets.
+
+##### Overall, these results suggest that the SGB model has learned the underlying patterns in the training data and generalizes reasonably well to unseen data on the test set
+
+
+```{r}
+set.seed(1234567)
+train_data <- cbind(X_train, vote_average = y_train)
+cs_trControl <- trainControl(method = "cv", number = 2)  
+garbage <- capture.output(
+cs_mdl_xgb <- train(
+   vote_average ~ ., 
+   data = train_data, 
+   method = "xgbTree",
+   tuneLength = 2,
+   trControl = cs_trControl
+))
+cs_mdl_xgb
+```
+
+##### The table shows a wide range of performance across different parameter settings. It seems increasing the model complexity (max_depth, nrounds) with a higher learning rate (eta) generally leads to lower RMSE and higher R-squared values, suggesting better performance on the training data. However, this might be due to overfitting.
+
+##### Overall, the results suggest that XGBoost has the potential to achieve good performance, but further evaluation and tuning are necessary to ensure it generalizes well to unseen data.
+
+
+```{r}
+cs_preds_xgb_test <- predict(cs_mdl_xgb, newdata = X_test)
+
+test_rmse_xgb <- RMSE(pred = cs_preds_xgb_test, obs = y_test)
+test_mae_xgb <- MAE(pred = cs_preds_xgb_test, obs = y_test)
+test_r_squared_xgb <- R2(pred = cs_preds_xgb_test, obs = y_test)
+```
+
+```{r}
+report_xgb <- list(
+  Train_Control = cs_trControl,
+  XGBoost_Model = cs_mdl_xgb,
+  Test_Performance = list(
+    RMSE = test_rmse_xgb,
+    MAE = test_mae_xgb,
+    R_squared = test_r_squared_xgb
+  )
+)
+
+report_xgb
+```
+
+
+
+
+```{r}
+cs_preds_xgb <- bind_cols(
+   Predicted = predict(cs_mdl_xgb, newdata = train_data),
+   Actual = train_data$vote_average
+)
+
+cs_preds_xgb %>%
+   ggplot(aes(x = Actual, y = Predicted)) +
+   geom_point(alpha = 0.6, color = "cadetblue") +
+   geom_smooth(method = "loess", formula = "y ~ x") +
+   geom_abline(intercept = 0, slope = 1, linetype = 2) +
+   labs(title = "Movies XGBoost, Predicted vs Actual")
+```
+
+```{r}
+cs_rmse_train_xgb <- 0.26153282
+test_rmse_xgb <- 0.1008201  
+cs_mae_train_xgb <- 0.18513128
+test_mae_xgb <- 0.06022609 
+cs_r2_train_xgb <- 0.9171620
+test_r_squared_xgb <- 0.9870451
+
+performance_comparison_xgb <- data.frame(
+  Dataset = c("Training", "Test"),
+  RMSE = c(cs_rmse_train_xgb, test_rmse_xgb),
+  MAE = c(cs_mae_train_xgb, test_mae_xgb),
+  R_squared = c(cs_r2_train_xgb, test_r_squared_xgb)
+)
+
+######### Print the dataframe
+print(performance_comparison_xgb)
+
+```
+##### The test set results are significantly better than the training set results. This is a strong indication of  overfitting. The model has learned the patterns in the training data too well, potentially memorizing specific noise or irrelevant details that don't generalize to unseen data (test set).
+
+
+
+```{r message=FALSE, warning=FALSE}
+
+
+library(knitr)
+library(kableExtra)
+
+# Performance metrics for Decision Tree
+dt_rmse_train <- 0.6650402
+dt_rmse_test <- 0.7692348
+dt_mae_train <- 0.4962441
+dt_mae_test <- 0.6002955
+dt_r2_train <- 0.3334713
+dt_r2_test <- 0.1914772
+
+# Performance metrics for Random Forest
+rf_rmse_train <- 0.1455388
+rf_rmse_test <- 0.1500730
+rf_mae_train <- 0.1000210
+rf_mae_test <- 0.1036525
+rf_r2_train <- 0.9851737
+rf_r2_test <- 0.9842613
+
+# Performance metrics for Stochastic Gradient Boosting
+sgb_rmse_train <- 0.2131104
+sgb_rmse_test <- 0.218
+sgb_mae_train <- 0.1526699
+sgb_mae_test <- 0.155
+sgb_r2_train <- 0.9506333
+sgb_r2_test <- 0.945
+
+# Performance metrics for XGBoost
+xgb_rmse_train <- 0.2615328
+xgb_rmse_test <- 0.1008201
+xgb_mae_train <- 0.18513128
+xgb_mae_test <- 0.06022609
+xgb_r2_train <- 0.9171620
+xgb_r2_test <- 0.9870451
+
+# Create the performance comparison data frame
+performance_comparison <- data.frame(
+  Model = rep(c("Decision Tree", "Random Forest", "Stochastic Gradient Boosting", "XGBoost"), each = 2),
+  Dataset = rep(c("Training", "Test"), 4),
+  RMSE = c(dt_rmse_train, dt_rmse_test, rf_rmse_train, rf_rmse_test, sgb_rmse_train, sgb_rmse_test, xgb_rmse_train, xgb_rmse_test),
+  MAE = c(dt_mae_train, dt_mae_test, rf_mae_train, rf_mae_test, sgb_mae_train, sgb_mae_test, xgb_mae_train, xgb_mae_test),
+  R_squared = c(dt_r2_train, dt_r2_test, rf_r2_train, rf_r2_test, sgb_r2_train, sgb_r2_test, xgb_r2_train, xgb_r2_test)
+)
+
+# Render the performance comparison table with blue and green colors
+performance_comparison %>%
+  kable("html", caption = "Performance Comparison of Different Models") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = F) %>%
+  column_spec(1, bold = TRUE, background = "#CCE5FF") %>%  # Light blue for Model column
+  column_spec(2, bold = TRUE, background = "#D5F5E3") %>%  # Light green for Dataset column
+  column_spec(3, background = "#D5E4EB") %>%  # Light blue for RMSE column
+  column_spec(4, background = "#D5E4EB") %>%  # Light blue for MAE column
+  column_spec(5, background = "#D5E4EB") %>%  # Light blue for R_squared column
+  row_spec(0, bold = TRUE, color = "white", background = "darkblue")
+
+
+```
+
+
+##### The best model to choose is the XGboost for its superior performance on the test set because the ability of easily addressing overfitting. This model will likely perform best on unseen data.
+
+
+
+```{r}
+models <- list(
+  Model = c("Decision Tree","Random Forest", "Stochastic Gradient Boosting", "XGBoost"),
+  `Training Performance` = c("Poor","Good", "Moderate", "Very Good"),
+  `Test Performance` = c("Very poor","Good (Similar to Training)", "Moderate (Slight Drop)", "Excellent (Large Drop)"),
+  `Overfitting Indication` = c("Low","Low", "Potential", "High")
+)
+
+model_data <- data.frame(models)
+
+cat("Model", " ", "Training Performance", " ", "Test Performance", " ", "Overfitting Indication", sep = "\t", fill = TRUE)
+cat("\n")
+print(model_data, rownames = FALSE)
+
+```
+
+
+
